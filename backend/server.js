@@ -19,11 +19,22 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (data) => {
     session.audioBuffer.push(data);
-    session.lastAudioTimestamp = Date.now();
-
-    console.log(
-      `[AUDIO] Session ${session.sessionId} received chunk (${data.length} bytes)`
-    );
+    
+    const floatFrame = new Float32Array(data.length / 2);
+    for (let i = 0; i < floatFrame.length; i++) {
+      floatFrame[i] = data.readInt16LE(i * 2) / 32768;
+    }
+  
+    const cleanFrame = session.noise.suppress(floatFrame);
+    const vadEvent = session.vad.process(cleanFrame);
+  
+    if (vadEvent === "speech_start") {
+      console.log(`[VAD] Speech started (${session.sessionId})`);
+    }
+  
+    if (vadEvent === "speech_end") {
+      console.log(`[VAD] Speech ended (${session.sessionId})`);
+    }
   });
 
   ws.on("close", () => {
