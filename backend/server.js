@@ -1,8 +1,7 @@
-
+require("dotenv").config();
 const WebSocket = require("ws");
 const SessionManager = require("./sessions/SessionManager");
 const { speechToText } = require("./stt/sttService");
-
 const PORT = 8080;
 const wss = new WebSocket.Server({ port: PORT });
 const sessionManager = new SessionManager();
@@ -12,6 +11,7 @@ console.log(` Voice Agent WebSocket server running on :${PORT}`);
 wss.on("connection", (ws) => {
   const session = sessionManager.createSession();
   console.log(" New session created:", session.sessionId);
+
 
   ws.send(JSON.stringify({
     type: "session_started",
@@ -26,14 +26,14 @@ wss.on("connection", (ws) => {
       }
       const cleanFrame = session.noise.suppress(floatFrame);
       const vadEvent = session.vad.process(cleanFrame);
-      if (session.isSpeaking) {
-        session.currentTurnAudio.push(Buffer.from(data));
-      }
-
       if (vadEvent === "speech_start") {
         session.isSpeaking = true;
         session.currentTurnAudio = [];
         console.log(`[TURN] Speech started (${session.sessionId})`);
+      }
+
+      if (session.isSpeaking) {
+        session.currentTurnAudio.push(Buffer.from(data));
       }
 
       if (vadEvent === "speech_end") {
@@ -58,6 +58,7 @@ wss.on("connection", (ws) => {
     sessionManager.deleteSession(session.sessionId);
   });
 });
+
 async function handleUserTurn(session) {
   const audioChunks = session.currentTurnAudio;
   session.currentTurnAudio = [];
