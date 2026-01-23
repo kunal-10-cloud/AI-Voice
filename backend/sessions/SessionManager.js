@@ -16,6 +16,9 @@ class SessionManager {
   getSession(sessionId) {
     return this.sessions.get(sessionId);
   }
+  getAllSessions() {
+    return this.sessions.values();
+  }
 
   deleteSession(sessionId) {
     this.sessions.delete(sessionId);
