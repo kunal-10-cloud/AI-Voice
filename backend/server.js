@@ -39,18 +39,27 @@ async function handleUserTurn(session) {
 
     console.log(`[USER SAID] (${session.sessionId}): ${transcript}`);
 
-    const messages = [
+    // Add user message to history
+    session.messages.push({ role: "user", content: transcript });
+
+    // Memory bounding: keep only last 12 messages (6 turns)
+    if (session.messages.length > 12) {
+      session.messages = session.messages.slice(-12);
+    }
+
+    // Construct request with dynamic system prompt
+    const messagesForLLM = [
       {
         role: "system",
         content: "You are a helpful, concise voice assistant.",
       },
-      {
-        role: "user",
-        content: transcript,
-      },
+      ...session.messages,
     ];
 
-    const llmResponse = await generateResponse({ messages });
+    const llmResponse = await generateResponse({ messages: messagesForLLM });
+
+    // Add assistant response to history
+    session.messages.push({ role: "assistant", content: llmResponse });
 
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${llmResponse}`);
   } catch (err) {

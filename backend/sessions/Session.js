@@ -12,6 +12,7 @@ class Session {
     this.context = {};
     this.noise = new NoiseSuppressor();
     this.vad = new VAD();
+    this.messages = []; // Conversation history
   }
 }
 
