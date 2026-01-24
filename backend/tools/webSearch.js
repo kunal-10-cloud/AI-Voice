@@ -1,32 +1,71 @@
 /**
- * Simple web search tool wrapper.
- * For production, use Tavily, Serper, or Google Search API.
- * This mock simulates a search for demonstration if no API key is set.
+ * Real-time web search tool using Tavily API.
+ * Performs grounded search for time-sensitive or external information.
  */
 async function webSearch(query) {
-    // Simulate network latency
-    await new Promise(resolve => setTimeout(resolve, 800));
+    const apiKey = process.env.TAVILY_API_KEY;
 
-    console.log(`[EXTERNAL] Searching for: ${query}`);
-
-    // Mock results for common queries
-    if (query.toLowerCase().includes("pune") && query.toLowerCase().includes("weather")) {
-        return [
-            { title: "Pune Weather - AccuWeather", snippet: "Mostly sunny and pleasant. High 31C. Winds light and variable.", source: "https://accuweather.com" },
-            { title: "Current Weather in Pune", snippet: "24°C, Humidity: 45%. Clear skies expected for the rest of the day.", source: "https://weather.com" }
-        ];
+    if (!apiKey) {
+        console.error("[SEARCH] Tavily request failed: TAVILY_API_KEY missing");
+        return [];
     }
 
-    if (query.toLowerCase().includes("openai")) {
-        return [
-            { title: "OpenAI Blog - News", snippet: "OpenAI announces new model capabilities and safety features.", source: "https://openai.com/blog" },
-            { title: "TechCrunch - OpenAI Updates", snippet: "Reports suggest OpenAI is expanding its infrastructure in 2026.", source: "https://techcrunch.com" }
-        ];
-    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4-second timeout
 
-    return [
-        { title: `Search results for ${query}`, snippet: "General information about the topic found on various educational and news sites.", source: "https://example.com" }
-    ];
+    try {
+        const response = await fetch("https://api.tavily.com/search", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                api_key: apiKey,
+                query: query,
+                search_depth: "basic",
+                include_images: false,
+                include_answer: false,
+                max_results: 5,
+            }),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            console.error(`[SEARCH] Tavily request failed: status ${response.status}`);
+            return [];
+        }
+
+        const data = await response.json();
+
+        if (!data.results || data.results.length === 0) {
+            console.log(`[SEARCH] Tavily returned no results`);
+            return [];
+        }
+
+        // Normalize and sanitize results
+        const normalizedResults = data.results
+            .map((r) => ({
+                title: r.title ? r.title.trim() : "No Title",
+                snippet: r.content ? r.content.trim() : "No snippet available",
+                source: r.url ? r.url.trim() : "Unknown Source",
+            }))
+            .filter((r) => r.snippet !== "No snippet available");
+
+        const finalResults = normalizedResults.slice(0, 5);
+        console.log(`[SEARCH] Tavily request successful (${finalResults.length} results)`);
+
+        return finalResults;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            console.error("[SEARCH] Tavily request failed: Timeout after 4s");
+        } else {
+            console.error(`[SEARCH] Tavily request failed: ${err.message}`);
+        }
+        return [];
+    }
 }
 
 module.exports = { webSearch };
