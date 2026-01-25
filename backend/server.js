@@ -1,4 +1,5 @@
 require("dotenv").config();
+const http = require("http");
 const WebSocket = require("ws");
 
 const SessionManager = require("./sessions/SessionManager");
@@ -10,10 +11,61 @@ const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
 const TURN_CHECK_INTERVAL_MS = 200;
 
-const wss = new WebSocket.Server({ port: PORT });
+// 1. Create HTTP Server for Admin API
+const server = http.createServer((req, res) => {
+  // Admin API: POST /admin/context
+  if (req.method === "POST" && req.url === "/admin/context") {
+    let body = "";
+    req.on("data", chunk => { body += chunk.toString(); });
+    req.on("end", () => {
+      try {
+        const { sessionId, content } = JSON.parse(body);
+
+        if (!sessionId || !content) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing sessionId or content" }));
+          return;
+        }
+
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Session not found" }));
+          return;
+        }
+
+        // Apply Context Update Atomicially
+        session.dynamicContext = [{ role: "system", content: content.trim() }];
+        session.contextVersion++;
+        console.log(`[CONTEXT] Session ${session.sessionId}: updated (v${session.contextVersion}) via ADMIN API`);
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, version: session.contextVersion }));
+
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
+
+  // Health Check
+  if (req.url === "/health") {
+    res.writeHead(200);
+    res.end("OK");
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("Not Found");
+});
+
+// 2. Attach WebSocket Server to HTTP Server
+const wss = new WebSocket.Server({ server });
 const sessionManager = new SessionManager();
 
-console.log(`Voice Agent WebSocket server running on :${PORT}`);
+console.log(`Voice Agent Server (HTTP + WS) running on :${PORT}`);
 
 /**
  * Intent Gating Logic: Only trigger search for specific, time-sensitive queries.
@@ -75,7 +127,12 @@ async function handleUserTurn(session) {
       content: "Analyze the user query. If it requires real-time facts (weather, news, stocks) and specifies a subject or location, respond ONLY with valid JSON: { \"search\": true, \"query\": \"...\" }. If it is a general question, definition, or skip-able, respond { \"search\": false }."
     };
 
-    const messagesForDecision = [decisionPrompt, ...session.messages];
+    // Inject Dynamic Context for Decision
+    const messagesForDecision = [
+      decisionPrompt,
+      ...session.dynamicContext,
+      ...session.messages
+    ];
     console.log(`[MEMORY] Session ${session.sessionId}: sending ${messagesForDecision.length} messages to decision LLM`);
 
     const decisionResponse = await generateResponse({ messages: messagesForDecision });
@@ -104,7 +161,12 @@ async function handleUserTurn(session) {
       content: "You are a helpful, concise voice assistant. site sources if you use search results."
     };
 
-    const finalMessages = [mainSystemPrompt, ...session.messages];
+    // Inject Dynamic Context for Final Response (Priority: System -> Dynamic -> History)
+    const finalMessages = [
+      mainSystemPrompt,
+      ...session.dynamicContext,
+      ...session.messages
+    ];
 
     // Inject EPHEMERAL search results if available
     if (searchContent) {
@@ -130,6 +192,7 @@ async function handleUserTurn(session) {
  */
 wss.on("connection", (ws) => {
   const session = sessionManager.createSession();
+  console.log(`[SERVER] New Session Created: ${session.sessionId}`);
 
   ws.send(
     JSON.stringify({
@@ -142,6 +205,35 @@ wss.on("connection", (ws) => {
   session.sttSocket = createStreamingSTT(session);
 
   ws.on("message", (data) => {
+    // 1. Handle JSON Control Messages (Context Updates) - KEEPING WS SUPPORT FOR COMPLETENESS
+    if (!Buffer.isBuffer(data)) {
+      try {
+        const message = JSON.parse(data);
+        if (message.type === "context_update") {
+          const content = message.payload?.content;
+
+          if (!content || typeof content !== "string" || !content.trim()) {
+            console.log(`[CONTEXT] Session ${session.sessionId}: update ignored (invalid payload)`);
+            return;
+          }
+
+          // Atomic Replace-by-Default
+          session.dynamicContext = [{ role: "system", content: content.trim() }];
+          session.contextVersion++;
+
+          console.log(`[CONTEXT] Session ${session.sessionId}: updated (v${session.contextVersion}) via WS`);
+        }
+        if (message.type === "debug_input") { // Added debug text input for testing
+          session.finalTranscript = message.text || "";
+          finalizeTurn(session);
+        }
+      } catch (e) {
+        // Ignore non-JSON text messages if any
+      }
+      return;
+    }
+
+    // 2. Handle Binary Audio Data
     session.lastAudioTimestamp = Date.now();
     const vadStatus = session.vad.process(data);
 
@@ -178,16 +270,25 @@ wss.on("connection", (ws) => {
 });
 
 async function finalizeTurn(session) {
-  if (!session.isSpeaking) return;
-  session.isSpeaking = false;
-  console.log(`[TURN] Speech ended (${session.sessionId})`);
+  // If simulated by debug_input, force isSpeaking to treat as turn end
+  // But normally isSpeaking is imperative.
+  // For debug logic, we just call handleUserTurn directly.
 
-  // Do NOT close STT socket here - keep it open for next turn
-  // Small delay to ensure Deepgram's final results are processed
-  await new Promise(resolve => setTimeout(resolve, 300));
+  // Normal VAD buffer flush logic for real audio
+  if (session.isSpeaking) {
+    session.isSpeaking = false;
+    console.log(`[TURN] Speech ended (${session.sessionId})`);
+    // Small delay to ensure Deepgram's final results are processed
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
 
   await handleUserTurn(session);
 }
+
+// Start Server
+server.listen(PORT, () => {
+  // console.log(`Voice Agent Server running on http://localhost:${PORT}`); -- logged above
+});
 
 setInterval(() => {
   const now = Date.now();

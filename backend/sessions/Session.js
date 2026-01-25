@@ -16,6 +16,8 @@ class Session {
     this.interimTranscript = ""; // Unstable, replace-only
     this.finalTranscript = "";   // Stable, append-only
     this.sttSocket = null;       // Deepgram streaming socket
+    this.dynamicContext = [];    // Real-time system instructions
+    this.contextVersion = 0;     // Incremental version counter
   }
 }
 
