@@ -13,6 +13,9 @@ class Session {
     this.noise = new NoiseSuppressor();
     this.vad = new VAD();
     this.messages = []; // Conversation history
+    this.interimTranscript = ""; // Unstable, replace-only
+    this.finalTranscript = "";   // Stable, append-only
+    this.sttSocket = null;       // Deepgram streaming socket
   }
 }
 

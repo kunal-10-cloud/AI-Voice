@@ -1,31 +1,57 @@
+const WebSocket = require("ws");
+const { cleanTranscript } = require("../utils/transcriptHelper");
+
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+const DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&interim_results=true&model=nova-2";
 
-const DEEPGRAM_URL =
-  "https://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1";
-
-async function speechToText(audioChunks) {
-  const audioBuffer = Buffer.concat(audioChunks);
-
-  const response = await fetch(DEEPGRAM_URL, {
-    method: "POST",
+/**
+ * Initialize a Deepgram Streaming connection for a session.
+ */
+function createStreamingSTT(session) {
+  const socket = new WebSocket(DEEPGRAM_WS_URL, {
     headers: {
       Authorization: `Token ${DEEPGRAM_API_KEY}`,
-      "Content-Type": "audio/raw",
     },
-    body: audioBuffer,
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Deepgram error: ${errText}`);
-  }
+  socket.on("open", () => {
+    console.log(`[STT] Deepgram connection opened (${session.sessionId})`);
+  });
 
-  const result = await response.json();
+  socket.on("message", (data) => {
+    try {
+      const response = JSON.parse(data);
+      const transcript = response.channel?.alternatives?.[0]?.transcript || "";
 
-  const transcript =
-    result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+      if (!transcript || transcript.length < 2) return;
 
-  return transcript.trim();
+      if (response.is_final === false) {
+        // Unstable interim result: replace
+        session.interimTranscript = transcript;
+        console.log(`[STT INTERIM] ${transcript}`);
+      } else if (response.is_final === true) {
+        // Stable final result: clean and append
+        const cleaned = cleanTranscript(transcript);
+        if (cleaned) {
+          session.finalTranscript = (session.finalTranscript + " " + cleaned).trim();
+          session.interimTranscript = ""; // Clear interim as it's now final
+          console.log(`[STT FINAL] ${cleaned}`);
+        }
+      }
+    } catch (err) {
+      console.error("[STT] Failed to parse Deepgram message:", err.message);
+    }
+  });
+
+  socket.on("close", () => {
+    console.log(`[STT] Deepgram connection closed (${session.sessionId})`);
+  });
+
+  socket.on("error", (err) => {
+    console.error("[STT] Deepgram error:", err.message);
+  });
+
+  return socket;
 }
 
-module.exports = { speechToText };
+module.exports = { createStreamingSTT };

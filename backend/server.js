@@ -2,7 +2,7 @@ require("dotenv").config();
 const WebSocket = require("ws");
 
 const SessionManager = require("./sessions/SessionManager");
-const { speechToText } = require("./stt/sttService");
+const { createStreamingSTT } = require("./stt/sttService");
 const { generateResponse } = require("./llm/llmService");
 const { webSearch } = require("./tools/webSearch");
 
@@ -44,28 +44,23 @@ function shouldTriggerSearch(query) {
 
 /**
  * Handle one completed user turn:
- * Audio → STT → Search Decision → (Optional Search) → Final Response
+ * Uses session.finalTranscript accumulated during streaming.
  */
 async function handleUserTurn(session) {
-  const audioChunks = session.currentTurnAudio;
-  session.currentTurnAudio = [];
+  const transcript = session.finalTranscript.trim();
 
-  if (!audioChunks || audioChunks.length === 0) {
-    console.log("[TURN] Empty turn, skipping");
+  // Reset transcript buffers for next turn immediately to avoid leakage
+  session.finalTranscript = "";
+  session.interimTranscript = "";
+
+  if (!transcript) {
+    console.log(`[USER SAID] (${session.sessionId}): <empty> (Skipping turn)`);
     return;
   }
 
-  console.log(`[STT] Processing ${audioChunks.length} audio chunks`);
+  console.log(`[STT FINAL COMMIT] (${session.sessionId}): ${transcript}`);
 
   try {
-    const transcript = await speechToText(audioChunks);
-    if (!transcript) {
-      console.log(`[USER SAID] (${session.sessionId}): <empty>`);
-      return;
-    }
-
-    console.log(`[USER SAID] (${session.sessionId}): ${transcript}`);
-
     // 1. Append user transcript to history
     session.messages.push({ role: "user", content: transcript });
 
@@ -143,18 +138,25 @@ wss.on("connection", (ws) => {
     })
   );
 
+  // Initialize Deepgram connection IMMEDIATELY
+  session.sttSocket = createStreamingSTT(session);
+
   ws.on("message", (data) => {
     session.lastAudioTimestamp = Date.now();
     const vadStatus = session.vad.process(data);
 
-    if (vadStatus === "speech_start" && !session.isSpeaking) {
-      session.isSpeaking = true;
-      session.currentTurnAudio = [];
-      console.log(`[TURN] Speech started (${session.sessionId})`);
+    // Stream ALL audio to Deepgram if socket is open (Always-On)
+    if (session.sttSocket && session.sttSocket.readyState === WebSocket.OPEN) {
+      session.sttSocket.send(data);
     }
 
-    if (session.isSpeaking) {
-      session.currentTurnAudio.push(data);
+    if (vadStatus === "speech_start" && !session.isSpeaking) {
+      session.isSpeaking = true;
+      console.log(`[TURN] Speech started (${session.sessionId})`);
+
+      // Reset buffers for clean turn start
+      session.finalTranscript = "";
+      session.interimTranscript = "";
     }
 
     if (vadStatus === "speech_end" && session.isSpeaking) {
@@ -163,12 +165,14 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    if (session.sttSocket) session.sttSocket.close();
     sessionManager.deleteSession(session.sessionId);
     console.log(`Session closed: ${session.sessionId}`);
   });
 
   ws.on("error", (err) => {
     console.error("WebSocket error:", err.message);
+    if (session.sttSocket) session.sttSocket.close();
     sessionManager.deleteSession(session.sessionId);
   });
 });
@@ -177,6 +181,11 @@ async function finalizeTurn(session) {
   if (!session.isSpeaking) return;
   session.isSpeaking = false;
   console.log(`[TURN] Speech ended (${session.sessionId})`);
+
+  // Do NOT close STT socket here - keep it open for next turn
+  // Small delay to ensure Deepgram's final results are processed
+  await new Promise(resolve => setTimeout(resolve, 300));
+
   await handleUserTurn(session);
 }
 
