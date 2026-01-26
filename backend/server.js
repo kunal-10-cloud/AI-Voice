@@ -6,6 +6,7 @@ const SessionManager = require("./sessions/SessionManager");
 const { createStreamingSTT } = require("./stt/sttService");
 const { generateResponse } = require("./llm/llmService");
 const { webSearch } = require("./tools/webSearch");
+const { streamTTS } = require("./tts/ttsService");
 
 const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
@@ -182,6 +183,9 @@ async function handleUserTurn(session) {
     session.messages.push({ role: "assistant", content: finalResponse });
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${finalResponse}`);
 
+    // 6. STREAM TTS
+    await streamTTS(finalResponse, session, session.ws);
+
   } catch (err) {
     console.error("[TURN] Failed to process user turn:", err.message);
   }
@@ -192,6 +196,7 @@ async function handleUserTurn(session) {
  */
 wss.on("connection", (ws) => {
   const session = sessionManager.createSession();
+  session.ws = ws; // Store client WS for TTS streaming
   console.log(`[SERVER] New Session Created: ${session.sessionId}`);
 
   ws.send(
@@ -245,6 +250,17 @@ wss.on("connection", (ws) => {
     if (vadStatus === "speech_start" && !session.isSpeaking) {
       session.isSpeaking = true;
       console.log(`[TURN] Speech started (${session.sessionId})`);
+
+      // BARGE-IN: Hard Interrupt TTS
+      if (session.isSpeakingTTS) {
+        session.isSpeakingTTS = false;
+        session.ttsRequestId++; // Invalidate pending chunks
+        if (session.ttsRequest) {
+          session.ttsRequest.destroy();
+          session.ttsRequest = null;
+        }
+        console.log(`[TTS] Session ${session.sessionId}: interrupted by user`);
+      }
 
       // Reset buffers for clean turn start
       session.finalTranscript = "";
