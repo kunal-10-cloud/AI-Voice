@@ -251,15 +251,20 @@ wss.on("connection", (ws) => {
       session.isSpeaking = true;
       console.log(`[TURN] Speech started (${session.sessionId})`);
 
-      // BARGE-IN: Hard Interrupt TTS
-      if (session.isSpeakingTTS) {
+      // BARGE-IN: If TTS is active OR was active recently (within 8 seconds), send interrupt signal to client
+      const isRecentlyActiveTTS = session.lastTTSActivity && (Date.now() - session.lastTTSActivity < 8000);
+
+      if (session.isSpeakingTTS || isRecentlyActiveTTS) {
         session.isSpeakingTTS = false;
-        session.ttsRequestId++; // Invalidate pending chunks
-        if (session.ttsRequest) {
-          session.ttsRequest.destroy();
-          session.ttsRequest = null;
+        session.lastTTSActivity = 0; // Reset
+        session.ttsRequestId++; // Invalidate any pending TTS sentences or ongoing generation
+
+        // Send barge-in control message to frontend
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "barge_in" }));
         }
-        console.log(`[TTS] Session ${session.sessionId}: interrupted by user`);
+
+        console.log(`[TTS] Barge-in triggered (session ${session.sessionId})`);
       }
 
       // Reset buffers for clean turn start

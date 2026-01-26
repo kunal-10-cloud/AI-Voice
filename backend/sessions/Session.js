@@ -24,6 +24,7 @@ class Session {
     this.isSpeakingTTS = false;     // Flag for active TTS
     this.ttsRequestId = 0;          // Counter for race condition prevention
     this.ws = null;                 // Client WebSocket for TTS streaming
+    this.lastTTSActivity = 0;       // Timestamp of last sent TTS audio
   }
 }
 

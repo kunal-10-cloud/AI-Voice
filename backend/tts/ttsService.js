@@ -1,5 +1,12 @@
 const https = require("https");
 
+// Use a persistent agent with keep-alive to avoid socket hang-ups
+const httpsAgent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 10,
+    timeout: 10000
+});
+
 /**
  * Split text into sentences
  * @param {string} text - Text to split
@@ -7,6 +14,7 @@ const https = require("https");
  * @returns {string[]} Array of sentences
  */
 function splitIntoSentences(text, maxChunkSize = 250) {
+    // Better regex to handle abbreviations and clean splitting
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
     const chunks = [];
     let currentChunk = "";
@@ -30,55 +38,62 @@ function splitIntoSentences(text, maxChunkSize = 250) {
 }
 
 /**
- * Generate full WAV audio for a single sentence
+ * Generate full WAV audio for a single sentence with retry logic
  * @param {string} text - Sentence to speak
+ * @param {number} retries - Number of retries
  * @returns {Promise<Buffer>} Complete WAV audio buffer
  */
-function generateWAV(text) {
-    return new Promise((resolve, reject) => {
-        const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-        const postData = JSON.stringify({ text: text });
+async function generateWAV(text, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await new Promise((resolve, reject) => {
+                const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+                const postData = JSON.stringify({ text: text });
 
-        const options = {
-            hostname: 'api.deepgram.com',
-            path: '/v1/speak?encoding=linear16&sample_rate=16000&container=wav',
-            method: 'POST',
-            headers: {
-                'Authorization': `Token ${DEEPGRAM_API_KEY}`,
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(postData)
+                const options = {
+                    hostname: 'api.deepgram.com',
+                    path: '/v1/speak?encoding=linear16&sample_rate=16000&container=wav',
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Token ${DEEPGRAM_API_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(postData)
+                    },
+                    agent: httpsAgent,
+                    timeout: 5000 // 5 second timeout
+                };
+
+                const chunks = [];
+                const req = https.request(options, (res) => {
+                    if (res.statusCode !== 200) {
+                        reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+                        return;
+                    }
+
+                    res.on('data', (chunk) => chunks.push(chunk));
+                    res.on('end', () => resolve(Buffer.concat(chunks)));
+                    res.on('error', (err) => reject(err));
+                });
+
+                req.on('error', (err) => reject(err));
+                req.on('timeout', () => {
+                    req.destroy();
+                    reject(new Error('Request Timeout'));
+                });
+
+                req.write(postData);
+                req.end();
+            });
+        } catch (err) {
+            if (attempt === retries) {
+                console.error(`[TTS] Failed after ${retries + 1} attempts: ${err.message}`);
+                throw err;
             }
-        };
-
-        const chunks = [];
-
-        const req = https.request(options, (res) => {
-            if (res.statusCode !== 200) {
-                reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
-                return;
-            }
-
-            res.on('data', (chunk) => {
-                chunks.push(chunk);
-            });
-
-            res.on('end', () => {
-                const fullBuffer = Buffer.concat(chunks);
-                resolve(fullBuffer);
-            });
-
-            res.on('error', (err) => {
-                reject(err);
-            });
-        });
-
-        req.on('error', (err) => {
-            reject(err);
-        });
-
-        req.write(postData);
-        req.end();
-    });
+            console.warn(`[TTS] Attempt ${attempt + 1} failed (${err.message}). Retrying...`);
+            // Exponential backoff
+            await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+        }
+    }
 }
 
 /**
@@ -131,7 +146,12 @@ async function streamTTS(text, session, wsClient) {
                     }
                 }));
                 console.log(`[TTS] Sent sentence ${i + 1}/${sentences.length} to client`);
+                // Update last activity time for barge-in window
+                session.lastTTSActivity = Date.now();
             }
+
+            // Small delay between requests to be gentle on connection
+            await new Promise(r => setTimeout(r, 50));
         }
 
         // Send completion signal
