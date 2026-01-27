@@ -7,6 +7,7 @@ const { createStreamingSTT } = require("./stt/sttService");
 const { generateResponse } = require("./llm/llmService");
 const { webSearch } = require("./tools/webSearch");
 const { streamTTS } = require("./tts/ttsService");
+const { cleanTextForSpeech } = require("./utils/speechCleanup");
 
 const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
@@ -159,7 +160,24 @@ async function handleUserTurn(session) {
     // 4. FINAL RESPONSE (Call 2)
     const mainSystemPrompt = {
       role: "system",
-      content: "You are a helpful, concise voice assistant. site sources if you use search results."
+      content: `You are a voice assistant speaking to a human in real time.
+
+IMPORTANT:
+- Respond in a natural, conversational speaking style.
+- Do NOT use bullet points, numbered lists, markdown, arrows, or headings.
+- Do NOT say words like "bullet point", "asterisk", or "star".
+- Avoid structured formatting.
+- Use short, flowing sentences.
+- Prefer explanations that sound like spoken language.
+- It should sound natural when read aloud by a text-to-speech engine.
+
+If the user asks for an explanation:
+- Explain it as if you are talking to them, not writing documentation.
+
+If the user asks for facts:
+- Present them conversationally, not as a list.
+
+Always optimize your response for spoken audio, not text display. site sources naturally if you use search results.`
     };
 
     // Inject Dynamic Context for Final Response (Priority: System -> Dynamic -> History)
@@ -183,8 +201,9 @@ async function handleUserTurn(session) {
     session.messages.push({ role: "assistant", content: finalResponse });
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${finalResponse}`);
 
-    // 6. STREAM TTS
-    await streamTTS(finalResponse, session, session.ws);
+    // 6. STREAM TTS (Clean text first)
+    const speechText = cleanTextForSpeech(finalResponse);
+    await streamTTS(speechText, session, session.ws);
 
   } catch (err) {
     console.error("[TURN] Failed to process user turn:", err.message);
