@@ -33,6 +33,10 @@ export function initWebSocket() {
       // Handle TTS completion
       ttsPlayer.handleComplete(msg.requestId);
     }
+    else if (msg.type === "barge_in") {
+      // Handle barge-in: immediately stop TTS playback
+      ttsPlayer.stopAll();
+    }
   };
 
   ws.onclose = () => {
