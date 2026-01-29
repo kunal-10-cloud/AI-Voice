@@ -8,6 +8,7 @@ import { TTSPlayer } from '@/lib/ttsPlayer';
 export function useVoiceAgent() {
     const [state, setState] = useState<AgentState>("idle");
     const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
+    const [metrics, setMetrics] = useState<any[]>([]);
     const [isAudioStarted, setIsAudioStarted] = useState(false);
 
     const wsRef = useRef<VoiceWebSocket | null>(null);
@@ -44,6 +45,12 @@ export function useVoiceAgent() {
                         }
                         return [...prev, { role: "assistant", text: msg.text! }];
                     });
+                }
+                break;
+
+            case "metrics":
+                if (msg.data && msg.turnId !== undefined) {
+                    setMetrics(prev => [{ turnId: msg.turnId, ...msg.data }, ...prev].slice(0, 10));
                 }
                 break;
 
@@ -107,6 +114,7 @@ export function useVoiceAgent() {
     return {
         state,
         transcript,
+        metrics,
         isAudioStarted,
         activateAudio
     };

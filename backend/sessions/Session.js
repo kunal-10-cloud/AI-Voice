@@ -25,6 +25,15 @@ class Session {
     this.ttsRequestId = 0;          // Counter for race condition prevention
     this.ws = null;                 // Client WebSocket for TTS streaming
     this.lastTTSActivity = 0;       // Timestamp of last sent TTS audio
+
+    // Metrics Tracking
+    this.turnId = 0;
+    this.turnStartTime = 0;         // Timestamp when speech ends
+    this.sttFinishTime = 0;         // Timestamp when STT finalized
+    this.llmTtftTime = 0;           // Timestamp of first LLM token
+    this.llmFinishTime = 0;         // Timestamp when full response generated
+    this.ttsFirstChunkTime = 0;     // Timestamp of first TTS chunk
+    this.hasBargeIn = false;        // Flag for current turn
   }
 }
 

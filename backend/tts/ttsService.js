@@ -126,6 +126,11 @@ async function streamTTS(text, session, wsClient) {
             // Generate full WAV buffer
             const wavBuffer = await generateWAV(sentences[i]);
 
+            // Track first TTS chunk for metrics
+            if (i === 0) {
+                session.ttsFirstChunkTime = Date.now();
+            }
+
             console.log(`[TTS] Generated sentence ${i + 1}/${sentences.length} (${wavBuffer.length} bytes)`);
 
             // Check again if interrupted during generation

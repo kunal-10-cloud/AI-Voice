@@ -3,16 +3,22 @@
 import { useVoiceAgent } from '@/hooks/useVoiceAgent';
 import Avatar from '@/components/Avatar';
 import TranscriptPanel from '@/components/TranscriptPanel';
+import MetricsPanel from '@/components/MetricsPanel';
 import { motion } from 'framer-motion';
 
 export default function Home() {
-  const { state, transcript, isAudioStarted, activateAudio } = useVoiceAgent();
+  const { state, transcript, metrics, isAudioStarted, activateAudio } = useVoiceAgent();
 
   return (
     <main
       onClick={activateAudio}
       className="flex h-screen w-full bg-[#0a0a0b] text-white overflow-hidden font-sans selection:bg-blue-500/30 cursor-pointer"
     >
+      {/* Sidebar Metrics (Left) */}
+      <aside className="w-[300px] flex-shrink-0 relative z-20 hidden lg:block">
+        <MetricsPanel metrics={metrics} />
+      </aside>
+
       {/* Central Content Area */}
       <div className="relative flex-1 flex flex-col items-center justify-between p-8 pt-24 pb-20">
         {/* Header Status */}
@@ -49,7 +55,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Sidebar Transcript */}
+      {/* Sidebar Transcript (Right) */}
       <aside className="w-[320px] lg:w-[400px] flex-shrink-0 relative z-20">
         <TranscriptPanel messages={transcript} />
       </aside>

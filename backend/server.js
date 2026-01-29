@@ -117,6 +117,10 @@ async function handleUserTurn(session) {
 
   console.log(`[STT FINAL COMMIT] (${session.sessionId}): ${transcript}`);
 
+  // STT Metric
+  session.sttFinishTime = Date.now();
+  session.turnId++;
+
   try {
     // 1. Append user transcript to history
     session.messages.push({ role: "user", content: transcript });
@@ -181,9 +185,11 @@ async function handleUserTurn(session) {
       });
     }
 
+    session.llmTtftTime = Date.now();
     const finalResponse = await generateResponse({ messages: finalMessages });
 
     // 5. FINALIZE: save only assistant content to history
+    session.llmFinishTime = Date.now();
     session.messages.push({ role: "assistant", content: finalResponse });
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${finalResponse}`);
 
@@ -193,6 +199,30 @@ async function handleUserTurn(session) {
       session.ws.send(JSON.stringify({ type: "transcript_assistant", text: finalResponse }));
     }
     await streamTTS(finalResponse, session, session.ws);
+
+    // 7. EMIT METRICS
+    if (session.ws && session.ws.readyState === 1) {
+      const sttLatency = session.sttFinishTime - session.turnStartTime;
+      const llmTtft = session.llmTtftTime ? (session.llmTtftTime - session.sttFinishTime) : 0;
+      const llmTotal = session.llmFinishTime - session.sttFinishTime;
+      const ttsLatency = session.ttsFirstChunkTime ? (session.ttsFirstChunkTime - session.llmFinishTime) : 0;
+      const e2eLatency = (session.ttsFirstChunkTime || Date.now()) - session.turnStartTime;
+
+      session.ws.send(JSON.stringify({
+        type: "metrics",
+        turnId: session.turnId,
+        data: {
+          sttLatencyMs: sttLatency,
+          llmTtftMs: llmTtft,
+          llmTotalMs: llmTotal,
+          ttsLatencyMs: ttsLatency,
+          e2eLatencyMs: e2eLatency,
+          bargeIn: session.hasBargeIn
+        }
+      }));
+      // Reset flags
+      session.hasBargeIn = false;
+    }
 
   } catch (err) {
     console.error("[TURN] Failed to process user turn:", err.message);
@@ -282,6 +312,7 @@ wss.on("connection", (ws) => {
           ws.send(JSON.stringify({ type: "barge_in" }));
         }
 
+        session.hasBargeIn = true;
         console.log(`[TTS] Barge-in triggered (session ${session.sessionId})`);
       }
 
@@ -316,6 +347,7 @@ async function finalizeTurn(session) {
   // Normal VAD buffer flush logic for real audio
   if (session.isSpeaking) {
     session.isSpeaking = false;
+    session.turnStartTime = Date.now();
     console.log(`[TURN] Speech ended (${session.sessionId})`);
 
     // Immediately tell the UI we are thinking to bridge the gap

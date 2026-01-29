@@ -7,13 +7,22 @@ export interface TranscriptMessage {
 }
 
 export interface WebSocketMessage {
-    type: "state" | "transcript_user" | "transcript_assistant" | "barge_in" | "session_started" | "tts_audio_full" | "tts_complete";
+    type: "state" | "transcript_user" | "transcript_assistant" | "barge_in" | "session_started" | "tts_audio_full" | "tts_complete" | "metrics";
     value?: AgentState;
     text?: string;
     sessionId?: string;
     payload?: any;
     requestId?: number;
     isInterim?: boolean;
+    turnId?: number;
+    data?: {
+        sttLatencyMs: number;
+        llmTtftMs: number;
+        llmTotalMs: number;
+        ttsLatencyMs: number;
+        e2eLatencyMs: number;
+        bargeIn: boolean;
+    };
 }
 
 export class VoiceWebSocket {
