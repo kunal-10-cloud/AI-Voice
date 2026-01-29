@@ -314,19 +314,24 @@ wss.on("connection", (ws) => {
         ws.send(JSON.stringify({ type: "state", value: "listening" }));
       }
 
-      // BARGE-IN: If TTS is active, stop it
-      if (session.isSpeakingTTS) {
-        session.isSpeakingTTS = false;
-        session.ttsRequestId++; // Invalidate any ongoing generation
+      // HARD BARGE-IN: Invalidate all existing TTS
+      session.ttsRequestId += 1;
+      session.isSpeakingTTS = false;
 
-        // Send barge-in control message to frontend
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: "barge_in" }));
-        }
-
-        session.hasBargeIn = true;
-        console.log(`[TTS] Barge-in triggered (session ${session.sessionId})`);
+      if (session.ttsSocket) {
+        try {
+          session.ttsSocket.close();
+        } catch (e) { }
+        session.ttsSocket = null;
       }
+
+      // Send barge-in control message to frontend
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "barge_in" }));
+      }
+
+      session.hasBargeIn = true;
+      console.log(`[TTS] Hard cancel triggered (requestId=${session.ttsRequestId})`);
 
       // Reset buffers for clean turn start
       session.finalTranscript = "";
@@ -391,10 +396,11 @@ setInterval(() => {
     }
   }
 }, TURN_CHECK_INTERVAL_MS);
+const https = require("https");
 // Self-ping to keep Render instance alive (every 5 minutes)
 const RENDER_EXTERNAL_URL = "https://ai-voice-qtky.onrender.com/health";
 setInterval(() => {
-  http.get(RENDER_EXTERNAL_URL, (res) => {
+  https.get(RENDER_EXTERNAL_URL, (res) => {
     console.log(`[SELF-PING] Status: ${res.statusCode}`);
   }).on("error", (err) => {
     console.log(`[SELF-PING] Failed: ${err.message}`);

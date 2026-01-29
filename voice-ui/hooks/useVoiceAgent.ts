@@ -18,7 +18,12 @@ export function useVoiceAgent() {
     const handleMessage = useCallback((msg: WebSocketMessage) => {
         switch (msg.type) {
             case "state":
-                if (msg.value) setState(msg.value);
+                if (msg.value) {
+                    setState(msg.value);
+                    if (msg.value === "listening" || msg.value === "thinking") {
+                        ttsPlayerRef.current?.stopAll();
+                    }
+                }
                 break;
 
             case "transcript_user":
@@ -56,6 +61,7 @@ export function useVoiceAgent() {
 
             case "barge_in":
                 ttsPlayerRef.current?.stopAll();
+                setState("listening");
                 break;
 
             case "tts_audio_full":

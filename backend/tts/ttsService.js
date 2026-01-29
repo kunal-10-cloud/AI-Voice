@@ -115,10 +115,10 @@ async function streamTTS(text, session, wsClient) {
 
     try {
         for (let i = 0; i < sentences.length; i++) {
-            // Check if interrupted
+            // STRICT BARGE-IN CHECK (Call to LLM/TTS generation)
             if (session.ttsRequestId !== currentRequestId) {
-                console.log(`[TTS] Interrupted at sentence ${i + 1}/${sentences.length}`);
-                break;
+                console.log(`[TTS] Hard stop at sentence ${i + 1}/${sentences.length} (requestId=${currentRequestId})`);
+                return;
             }
 
             console.log(`[TTS] Generating sentence ${i + 1}/${sentences.length}: "${sentences[i].substring(0, 50)}..."`);
@@ -131,13 +131,13 @@ async function streamTTS(text, session, wsClient) {
                 session.ttsFirstChunkTime = Date.now();
             }
 
-            console.log(`[TTS] Generated sentence ${i + 1}/${sentences.length} (${wavBuffer.length} bytes)`);
-
-            // Check again if interrupted during generation
+            // STRICT BARGE-IN CHECK (After generation, before sending)
             if (session.ttsRequestId !== currentRequestId) {
-                console.log(`[TTS] Interrupted after generating sentence ${i + 1}/${sentences.length}`);
-                break;
+                console.log(`[TTS] Dropping stale audio chunk index ${i} (requestId=${currentRequestId})`);
+                return;
             }
+
+            console.log(`[TTS] Generated sentence ${i + 1}/${sentences.length} (${wavBuffer.length} bytes)`);
 
             // Send complete WAV as base64
             if (wsClient.readyState === 1) {
@@ -150,7 +150,7 @@ async function streamTTS(text, session, wsClient) {
                         requestId: currentRequestId
                     }
                 }));
-                console.log(`[TTS] Sent sentence ${i + 1}/${sentences.length} to client`);
+                console.log(`[TTS] Sent sentence ${i + 1}/${sentences.length} to client (requestId=${currentRequestId})`);
                 // Update last activity time for barge-in window
                 session.lastTTSActivity = Date.now();
             }
@@ -169,10 +169,6 @@ async function streamTTS(text, session, wsClient) {
 
     } catch (err) {
         console.error(`[TTS] Error: ${err.message}`);
-    } finally {
-        if (session.ttsRequestId === currentRequestId) {
-            session.isSpeakingTTS = false;
-        }
     }
 }
 

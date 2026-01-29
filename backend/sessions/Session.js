@@ -23,6 +23,7 @@ class Session {
     this.ttsRequest = null;         // HTTPS request for TTS stream
     this.isSpeakingTTS = false;     // Flag for active TTS
     this.ttsRequestId = 0;          // Counter for race condition prevention
+    this.ttsSocket = null;          // Hard cancellation handle
     this.ws = null;                 // Client WebSocket for TTS streaming
     this.lastTTSActivity = 0;       // Timestamp of last sent TTS audio
 

@@ -1,6 +1,6 @@
 class VAD {
   constructor() {
-    this.speechThreshold = 0.005; // Slightly lower threshold for raw PCM
+    this.speechThreshold = 0.003; // Lower threshold to detect user speech over background noise/playback
     this.silenceFrames = 0;
     this.speaking = false;
     this.SILENCE_LIMIT = 8; // ~1.6s if frames are 200ms
