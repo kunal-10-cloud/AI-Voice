@@ -7,7 +7,6 @@ const { createStreamingSTT } = require("./stt/sttService");
 const { generateResponse } = require("./llm/llmService");
 const { webSearch } = require("./tools/webSearch");
 const { streamTTS } = require("./tts/ttsService");
-const { cleanTextForSpeech } = require("./utils/speechCleanup");
 
 const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
@@ -109,6 +108,10 @@ async function handleUserTurn(session) {
 
   if (!transcript) {
     console.log(`[USER SAID] (${session.sessionId}): <empty> (Skipping turn)`);
+    // Authority: Return to idle if nothing was said
+    if (session.ws && session.ws.readyState === 1) {
+      session.ws.send(JSON.stringify({ type: "state", value: "idle" }));
+    }
     return;
   }
 
@@ -160,24 +163,7 @@ async function handleUserTurn(session) {
     // 4. FINAL RESPONSE (Call 2)
     const mainSystemPrompt = {
       role: "system",
-      content: `You are a voice assistant speaking to a human in real time.
-
-IMPORTANT:
-- Respond in a natural, conversational speaking style.
-- Do NOT use bullet points, numbered lists, markdown, arrows, or headings.
-- Do NOT say words like "bullet point", "asterisk", or "star".
-- Avoid structured formatting.
-- Use short, flowing sentences.
-- Prefer explanations that sound like spoken language.
-- It should sound natural when read aloud by a text-to-speech engine.
-
-If the user asks for an explanation:
-- Explain it as if you are talking to them, not writing documentation.
-
-If the user asks for facts:
-- Present them conversationally, not as a list.
-
-Always optimize your response for spoken audio, not text display. site sources naturally if you use search results.`
+      content: "You are a helpful voice assistant. Keep your responses conversational and concise."
     };
 
     // Inject Dynamic Context for Final Response (Priority: System -> Dynamic -> History)
@@ -201,9 +187,12 @@ Always optimize your response for spoken audio, not text display. site sources n
     session.messages.push({ role: "assistant", content: finalResponse });
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${finalResponse}`);
 
-    // 6. STREAM TTS (Clean text first)
-    const speechText = cleanTextForSpeech(finalResponse);
-    await streamTTS(speechText, session, session.ws);
+    // 6. STREAM TTS
+    if (session.ws && session.ws.readyState === 1) {
+      session.ws.send(JSON.stringify({ type: "state", value: "speaking" }));
+      session.ws.send(JSON.stringify({ type: "transcript_assistant", text: finalResponse }));
+    }
+    await streamTTS(finalResponse, session, session.ws);
 
   } catch (err) {
     console.error("[TURN] Failed to process user turn:", err.message);
@@ -251,6 +240,14 @@ wss.on("connection", (ws) => {
           session.finalTranscript = message.text || "";
           finalizeTurn(session);
         }
+        if (message.type === "playback_complete") {
+          console.log(`[TTS] Client finished playback (${session.sessionId})`);
+          session.isSpeakingTTS = false;
+          // Authority: Now that audio is done, we can go idle
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "state", value: "idle" }));
+          }
+        }
       } catch (e) {
         // Ignore non-JSON text messages if any
       }
@@ -270,13 +267,15 @@ wss.on("connection", (ws) => {
       session.isSpeaking = true;
       console.log(`[TURN] Speech started (${session.sessionId})`);
 
-      // BARGE-IN: If TTS is active OR was active recently (within 8 seconds), send interrupt signal to client
-      const isRecentlyActiveTTS = session.lastTTSActivity && (Date.now() - session.lastTTSActivity < 8000);
+      // Emit listening state to UI
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "state", value: "listening" }));
+      }
 
-      if (session.isSpeakingTTS || isRecentlyActiveTTS) {
+      // BARGE-IN: If TTS is active, stop it
+      if (session.isSpeakingTTS) {
         session.isSpeakingTTS = false;
-        session.lastTTSActivity = 0; // Reset
-        session.ttsRequestId++; // Invalidate any pending TTS sentences or ongoing generation
+        session.ttsRequestId++; // Invalidate any ongoing generation
 
         // Send barge-in control message to frontend
         if (ws.readyState === 1) {
@@ -318,6 +317,12 @@ async function finalizeTurn(session) {
   if (session.isSpeaking) {
     session.isSpeaking = false;
     console.log(`[TURN] Speech ended (${session.sessionId})`);
+
+    // Immediately tell the UI we are thinking to bridge the gap
+    if (session.ws && session.ws.readyState === 1) {
+      session.ws.send(JSON.stringify({ type: "state", value: "thinking" }));
+    }
+
     // Small delay to ensure Deepgram's final results are processed
     await new Promise(resolve => setTimeout(resolve, 300));
   }

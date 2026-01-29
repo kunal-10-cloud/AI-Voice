@@ -29,6 +29,11 @@ function createStreamingSTT(session) {
         // Unstable interim result: replace
         session.interimTranscript = transcript;
         console.log(`[STT INTERIM] ${transcript}`);
+
+        // Emit interim to UI
+        if (session.ws && session.ws.readyState === 1) {
+          session.ws.send(JSON.stringify({ type: "transcript_user", text: transcript, isInterim: true }));
+        }
       } else if (response.is_final === true) {
         // Stable final result: clean and append
         const cleaned = cleanTranscript(transcript);
@@ -36,6 +41,11 @@ function createStreamingSTT(session) {
           session.finalTranscript = (session.finalTranscript + " " + cleaned).trim();
           session.interimTranscript = ""; // Clear interim as it's now final
           console.log(`[STT FINAL] ${cleaned}`);
+
+          // Emit final to UI
+          if (session.ws && session.ws.readyState === 1) {
+            session.ws.send(JSON.stringify({ type: "transcript_user", text: cleaned, isInterim: false }));
+          }
         }
       }
     } catch (err) {

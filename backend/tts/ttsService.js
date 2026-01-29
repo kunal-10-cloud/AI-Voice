@@ -154,13 +154,12 @@ async function streamTTS(text, session, wsClient) {
             await new Promise(r => setTimeout(r, 50));
         }
 
-        // Send completion signal
         if (session.ttsRequestId === currentRequestId && wsClient.readyState === 1) {
             wsClient.send(JSON.stringify({
                 type: "tts_complete",
                 requestId: currentRequestId
             }));
-            console.log(`[TTS] Session ${session.sessionId}: all sentences sent`);
+            console.log(`[TTS] Session ${session.sessionId}: all sentences sent. Waiting for playback to finish...`);
         }
 
     } catch (err) {
