@@ -100,8 +100,11 @@ export function useVoiceAgent() {
     }, [isAudioStarted]);
 
     useEffect(() => {
-        // Only connect on client-side
-        const ws = new VoiceWebSocket("ws://localhost:8080", handleMessage);
+        // Use production URL if defined, otherwise fallback to localhost for dev
+        const BACKEND_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://ai-voice-qtky.onrender.com";
+
+        console.log(`[WS] Connecting to: ${BACKEND_URL}`);
+        const ws = new VoiceWebSocket(BACKEND_URL, handleMessage);
         ws.connect();
         wsRef.current = ws;
 

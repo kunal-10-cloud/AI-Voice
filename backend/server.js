@@ -14,6 +14,18 @@ const TURN_CHECK_INTERVAL_MS = 200;
 
 // 1. Create HTTP Server for Admin API
 const server = http.createServer((req, res) => {
+  // Add CORS headers for all requests
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // Handle preflight OPTIONS request
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   // Admin API: POST /admin/context
   if (req.method === "POST" && req.url === "/admin/context") {
     let body = "";
@@ -379,3 +391,12 @@ setInterval(() => {
     }
   }
 }, TURN_CHECK_INTERVAL_MS);
+// Self-ping to keep Render instance alive (every 5 minutes)
+const RENDER_EXTERNAL_URL = "https://ai-voice-qtky.onrender.com/health";
+setInterval(() => {
+  http.get(RENDER_EXTERNAL_URL, (res) => {
+    console.log(`[SELF-PING] Status: ${res.statusCode}`);
+  }).on("error", (err) => {
+    console.log(`[SELF-PING] Failed: ${err.message}`);
+  });
+}, 300000); // 5 minutes (300,000 ms)
