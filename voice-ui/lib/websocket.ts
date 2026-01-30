@@ -4,6 +4,7 @@ export type AgentState = "idle" | "listening" | "thinking" | "speaking";
 export interface TranscriptMessage {
     role: "user" | "assistant";
     text: string;
+    isInterim?: boolean;
 }
 
 export interface WebSocketMessage {
