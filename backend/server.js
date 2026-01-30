@@ -7,6 +7,7 @@ const { createStreamingSTT } = require("./stt/sttService");
 const { generateResponse } = require("./llm/llmService");
 const { webSearch } = require("./tools/webSearch");
 const { streamTTS } = require("./tts/ttsService");
+const { formatForSpeech } = require("./utils/speechFormatter");
 
 const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
@@ -179,7 +180,13 @@ async function handleUserTurn(session) {
     // 4. FINAL RESPONSE (Call 2)
     const mainSystemPrompt = {
       role: "system",
-      content: "You are a helpful voice assistant. Keep your responses conversational and concise."
+      content: `You are a voice assistant speaking to a human in real time. Your response will be spoken aloud using text-to-speech, not read on a screen.
+
+Strict Rules:
+- Do NOT use bullet points, numbered lists, markdown, or symbols.
+- Speak in natural, conversational sentences. Prefer short sentences.
+- Convert specific symbols to speech: 31°C becomes "thirty one degrees", 50% becomes "fifty percent".
+- Keep responses concise, friendly, and human. No robotic phrasing.`
     };
 
     // Inject Dynamic Context for Final Response (Priority: System -> Dynamic -> History)
@@ -205,12 +212,15 @@ async function handleUserTurn(session) {
     session.messages.push({ role: "assistant", content: finalResponse });
     console.log(`[LLM RESPONSE] (${session.sessionId}): ${finalResponse}`);
 
+    // Post-process for speech
+    const speechOutput = formatForSpeech(finalResponse);
+
     // 6. STREAM TTS
     if (session.ws && session.ws.readyState === 1) {
       session.ws.send(JSON.stringify({ type: "state", value: "speaking" }));
       session.ws.send(JSON.stringify({ type: "transcript_assistant", text: finalResponse }));
     }
-    await streamTTS(finalResponse, session, session.ws);
+    await streamTTS(speechOutput, session, session.ws);
 
     // 7. EMIT METRICS
     if (session.ws && session.ws.readyState === 1) {
