@@ -6,14 +6,14 @@
  * 2. Paste the Target Session ID (found in server logs).
  * 3. Type a system instruction and press ENTER.
  * 
- * This sends an HTTP POST to /admin/context to control a specific active session.
+ * This sends an HTTPS POST to /admin/context to control a specific active session on the deployed server.
  */
 
-const http = require("http");
+const https = require("https");
 const readline = require("readline");
 
-const API_HOST = "localhost";
-const API_PORT = 8080;
+const API_HOST = "ai-voice-qtky.onrender.com";
+const API_PROTOCOL = "https:";
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -54,7 +54,6 @@ function sendUpdate(content) {
 
     const options = {
         hostname: API_HOST,
-        port: API_PORT,
         path: "/admin/context",
         method: "POST",
         headers: {
@@ -63,7 +62,7 @@ function sendUpdate(content) {
         }
     };
 
-    const req = http.request(options, (res) => {
+    const req = https.request(options, (res) => {
         let responseBody = "";
         res.on("data", (chunk) => { responseBody += chunk; });
 
